@@ -1,0 +1,109 @@
+// 🧪 EventAction + SpectrumDetector в одному файлі
+
+// ---------------- EventAction ----------------
+class EventAction : public G4UserEventAction {
+public:
+    EventAction() {
+        fout.open("event_energy.txt");
+    }
+    ~EventAction() override {
+        fout.close();
+    }
+    void BeginOfEventAction(const G4Event* evt) override {
+        edepTotal = 0.0;
+        evtID = evt->GetEventID();
+    }
+    void EndOfEventAction(const G4Event*) override {
+        if (edepTotal > 0.0)
+            fout << evtID << "\t" << edepTotal / keV << "\n";
+    }
+    void AddEdep(G4double edep) { edepTotal += edep; }
+private:
+    G4double edepTotal = 0.0;
+    G4int evtID = 0;
+    std::ofstream fout;
+};
+
+// ---------------- SpectrumDetector ----------------
+class SpectrumDetector : public G4VSensitiveDetector {
+public:
+    SpectrumDetector(const G4String& name) : G4VSensitiveDetector(name) {
+        fout.open("photon_energy.txt");
+    }
+    ~SpectrumDetector() override {
+        fout.close();
+    }
+    G4bool ProcessHits(G4Step* step, G4TouchableHistory*) override {
+        auto* track = step->GetTrack();
+        if (track->GetDefinition() != G4Gamma::GammaDefinition())
+            return false;
+
+        G4double E = step->GetPreStepPoint()->GetKineticEnergy();
+        G4ThreeVector pos = step->GetPreStepPoint()->GetPosition();
+        fout << E / keV << "\t"
+             << pos.x() / cm << "\t"
+             << pos.y() / cm << "\t"
+             << pos.z() / cm << "\n";
+
+        auto* ea = static_cast<EventAction*>(G4EventManager::GetEventManager()->GetUserEventAction());
+        if (ea) ea->AddEdep(E);
+        return true;
+    }
+private:
+    std::ofstream fout;
+};
+
+
+void PrintPhotonHistogramAsBar() {
+    G4cout << "\n📊 Спектр вхідних енергій (photon_energy.txt):\n";
+
+    // Знайдемо максимальну кількість — для масштабування
+    int maxCount = *std::max_element(photonEnergyHist.begin(), photonEnergyHist.end());
+    if (maxCount == 0) {
+        G4cout << "ℹ️ Жодного фотона не було зафіксовано.\n";
+        return;
+    }
+
+    for (int i = 0; i < NUM_CHANNELS; ++i) {
+        int count = photonEnergyHist[i];
+        if (count == 0) continue;
+
+        double energy_keV = (2.0 * i / NUM_CHANNELS) * 1000.0;
+        int barLen = static_cast<int>((40.0 * count) / maxCount);  // Масштаб до 40 символів
+
+        G4cout << std::setw(5) << std::fixed << std::setprecision(0)
+               << energy_keV << " keV | "
+               << std::string(barLen, '█') << " "
+               << count << G4endl;
+    }
+
+    G4cout << "=========================================" << G4endl;
+}
+
+void PrintEnergyLossHistogramAsBar() {
+    G4cout << "\n📊 Спектр втрат енергії (energy_loss.txt):\n";
+
+    int maxCount = *std::max_element(energyLossHist.begin(), energyLossHist.end());
+    if (maxCount == 0) {
+        G4cout << "ℹ️ Втрат енергії не зафіксовано.\n";
+        return;
+    }
+
+    for (int i = 0; i < NUM_CHANNELS; ++i) {
+        int count = energyLossHist[i];
+        if (count == 0) continue;
+
+        double E = (2.0 * i / NUM_CHANNELS) * 1000.0;  // keV
+        int barLen = static_cast<int>((40.0 * count) / maxCount);
+
+        G4cout << std::setw(5) << std::fixed << std::setprecision(0)
+               << E << " keV | "
+               << std::string(barLen, '█') << " "
+               << count << G4endl;
+    }
+
+    G4cout << "=========================================" << G4endl;
+}
+RunAction::EndOfRunAction(...)
+specDet->PrintPhotonHistogramAsBar();      // спектр вхідних фотонів
+specDet->PrintEnergyLossHistogramAsBar();  // спектр втрат
